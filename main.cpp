@@ -1,6 +1,4 @@
-
-#include <mpi.h>
-#include <thread>
+#include "main.hpp"
 
 
  /* TODO: Stworzenie typu */
@@ -9,7 +7,8 @@
     */
     /* sklejone z stackoverflow */
    
-/*    const int nitems=3; bo packet_t ma trzy pola 
+/*
+    const int nitems=3; bo packet_t ma trzy pola 
     int       blocklengths[3] = {1,1,1};
     MPI_Datatype typy[3] = {MPI_INT, MPI_INT, MPI_INT};
     MPI_Aint     offsets[3]; 
@@ -21,10 +20,7 @@
     MPI_Type_commit(&MPI_PAKIET_T);
 */
 
-
-void check_thread_support(int provided);
-void initialize(int *argc, char ***argv);
-void finalize();
+MPI_Datatype MPI_PAKIET_T;
 
 int size, rank, lamportClock; /* nie trzeba zerować, bo zmienna globalna statyczna */
 //TODO: MPI_Datatype MPI_PAKIET_T;
@@ -74,6 +70,18 @@ void initialize(int *argc, char ***argv)
     MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     check_thread_support(provided);
 
+    const int nitems=4;// bo packet_t ma trzy pola 
+    int       blocklengths[4] = {1,1,1,1};
+    MPI_Datatype typy[4] = {MPI_INT, MPI_CHAR, MPI_INT, MPI_CHAR};
+    MPI_Aint     offsets[4]; 
+    offsets[0] = offsetof(packet_t, ts);
+    offsets[1] = offsetof(packet_t, type);
+    offsets[2] = offsetof(packet_t, id);
+    offsets[3] = offsetof(packet_t, action);
+
+    MPI_Type_create_struct(nitems, blocklengths, offsets, typy, &MPI_PAKIET_T);
+    MPI_Type_commit(&MPI_PAKIET_T);
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     srand(rank);
@@ -81,7 +89,7 @@ void initialize(int *argc, char ***argv)
     if (rank==0) {
         //TODO: monitor
     }
-    printf("elo\n");
+    printf("%d/%d Started\n", rank+1, size);
     //TODO: debug("jestem");
 }
 
