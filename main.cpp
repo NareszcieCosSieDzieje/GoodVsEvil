@@ -7,8 +7,9 @@ std::mutex globalAckMutex;
 std::mutex lamportClockMutex;
 
 // Zmienne globalne statyczne
-int size, rank, lamportClock, resourceCount, globalAck;
+int size, rank, lamportClock, resourceCount, globalAck, reqLamportClock;
 char role;
+int badCount = 0, globalCount = 0;
 state_t state;
 
 int idChosen = -1;
@@ -16,6 +17,9 @@ char objectChosen = 'x';
 
 std::vector<std::vector<int>> toilets;
 std::vector<std::vector<int>> flowerpots;
+
+std::vector<char> toiletsState;
+std::vector<char> flowerpotsState;
 
 std::thread monitorThread;
 std::thread communcationThread;
@@ -32,19 +36,16 @@ Wektor zgód dla doniczek -
 
 int main(int argc, char** argv){
 
+    
     globalAckMutex.lock();
 
 
-    printf("Wchodze w init\n");
     initialize(&argc, &argv);
 
-    printf("Wchpodze w mainLoop\n");    
     //doMain
 
     mainLoop();
     
-
-    printf("Wchodze w final\n");
 
     finalize();
     return 0;
@@ -78,6 +79,10 @@ void check_thread_support(int provided) {
 
 
 void initialize(int *argc, char ***argv) {
+    int argc1 = *argc;
+    char **argv1 = *argv;
+
+    
     int provided;
     MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     check_thread_support(provided);
@@ -99,9 +104,21 @@ void initialize(int *argc, char ***argv) {
     srand(rank);
     
     //enum role {good, bad} eRole;
+    //TODO: zagwarantowac przynjmaniej jednego zlego i jednego dobrego
+    
+    
+
     role = (rand() % 100 >= 50)? 'g' : 'b';
     
-    if(role == 'g') {
+    
+    if (rank == 0) {
+        role = 'g';
+    } else if (rank == 1) {
+        role = 'b';
+    }
+    
+
+    if (role == 'g') {
         std::cout << "Process " << rank << " is a Goodguy :~)" << std::endl;
         //startGood()
     }
@@ -110,25 +127,30 @@ void initialize(int *argc, char ***argv) {
         //startBad()
     }
 
+    resourceCount = size;
+    int randomCount = rand() % (resourceCount - 1) + 1;
+    randomCount = atoi(argv1[1]);
+
+    toilets.resize(randomCount);
+    flowerpots.resize(resourceCount - randomCount);
+    toiletsState.resize(randomCount, 'g');
+    flowerpotsState.resize(resourceCount - randomCount, 'g');
     
-    if(rank == 0){
-        resourceCount = size / 2;
-        int randomCount = rand() % (resourceCount - 1) + 1;
-        toilets.resize(randomCount);
-        flowerpots.resize(resourceCount - randomCount);
+    if (rank == 0) {
         std::cout << "Resource Count: " << resourceCount << std::endl;
         std::cout << " - Toilet Count: " << toilets.size() << std::endl;
         std::cout << " - Flowerpots Count: " << flowerpots.size() << std::endl;
         monitorThread = std::thread(monitorLoop);
     }
     communcationThread = std::thread(communicationLoop);
+    std::cout << rank << "." << toiletsState << flowerpotsState << std::endl;
 
     std::cout << rank+1 << "/" << size << " Initialized" << std::endl;
-    //TODO: debug("jestem");
 }
 
-/* usunięcie zamków, czeka, aż zakończy się drugi wątek, zwalnia przydzielony typ MPI_PACKET_T
-   wywoływane w funkcji main przed końcem
+/*
+usunięcie zamków, czeka, aż zakończy się drugi wątek, zwalnia przydzielony typ MPI_PACKET_T
+wywoływane w funkcji main przed końcem
 */
 void finalize() {
     //TODO: println("czekam na wątek \"komunikacyjny\"\n" );
@@ -136,72 +158,98 @@ void finalize() {
     if (rank == 0) {
         monitorThread.join();
     }
+    std::cout << rank << "." << lamportClock << " actions: " << globalCount - badCount << "/" << globalCount << " = " << (float) (globalCount - badCount)/globalCount << std::endl;
 
     MPI_Type_free(&MPI_PACKET_T);
     MPI_Finalize();
 }
 
-//TODO: dodac petle
 void mainLoop(void) {
     const int baseChance = 50;
     const int missDecrease = 5;
     
     int tresh = baseChance;
+    std::cout << rank << ". MainLoop Entered" << std::endl;
     while (state != end) {
         int chance = rand() % 100;
         if (chance >= tresh) {
             tresh = baseChance;
-
-            idChosen = -1;        
+            
+            idChosen = -1;
             objectChosen = 'x';
-            if(rand()%2){
+
+            int typeChance = rand() % 100;
+            if (typeChance > 50) {
                 objectChosen = 't';
                 idChosen = rand() % toilets.size();
             } else {
                 objectChosen = 'f';
                 idChosen = rand() % flowerpots.size();
             }
-            printf("DEBUG1\n");
-            // losowanie toaleta vs doniczka
-            // losowanie id
+            //std::cout << rank << "." << lamportClock << " Requesting resource " << objectChosen << "[" << idChosen << "]" << std::endl;
+            
             packet_t packet{};
             MPI_Status status{};
 
             // send request
-            for(int i = 0; i< size; i++){
+            reqLamportClock = lamportClock;
+            for(int i = 0; i < size; i++){
                 if(i == rank){ 
                     continue;
                 }
-                //TODO: packet uzupelnic, moze jakas funkcyjka
-                sendPacket(&packet, i, TAG_REQ, objectChosen, rank, role); 
+                sendPacket(&packet, i, TAG_REQ, objectChosen, idChosen, role);
             }
-            printf("DEBUG2\n");
-
             
             globalAckMutex.lock();
 
-            printf("DEBUG3\n");
-            // sekcja krytyczna
+            if (objectChosen == 't') {
+                if (toiletsState[idChosen] == role) {
+                    //std::cout << rank << ". I wanted to do " << role << " but it was already " << toiletsState[idChosen] << std::endl;
+                    badCount++;
+                }
+                else {
+                    toiletsState[idChosen] = role;
+                    //std::cout << rank << ". I wanted to do " << role << " and I did it" << std::endl;
+                }
+            }
+            else if (objectChosen == 'f') {
+                if (flowerpotsState[idChosen] == role) {
+                    //std::cout << rank << ". I wanted to do " << role << " but it was already " << flowerpotsState[idChosen] << std::endl;
+                    badCount++;
+                }
+                else {
+                    flowerpotsState[idChosen] = role;
+                    //std::cout << rank << ". I wanted to do " << role << " and I did it" << std::endl;
+                }
+            }
+            globalCount++;
 
+            // sekcja krytyczna
+            
             // usuwanie z kolejki (wysyłanie do ludzi ack)
             if (objectChosen == 'f') {
                 for (int i = 0; i < flowerpots[idChosen].size(); i++) {
+                    //std::cout << rank << ". Send to " << flowerpots[idChosen].back() << std::endl;
                     sendPacket(&packet, flowerpots[idChosen].back(), TAG_ACK, 'f', idChosen, role);
                     flowerpots[idChosen].pop_back();
                 }
             }
             else if (objectChosen == 't') {
                 for (int i = 0; i < toilets[idChosen].size(); i++) {
+                    //std::cout << rank << ". Send to " << toilets[idChosen].back() << std::endl;
                     sendPacket(&packet, toilets[idChosen].back(), TAG_ACK, 't', idChosen, role);
                     toilets[idChosen].pop_back();
                 }
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         } else {
+            //std::cout << rank << ". Goes to sleep" << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             tresh -= missDecrease;
         }
         chance = rand() % 100;
-        if (chance > tresh) {
+        if (chance > baseChance) {
+            //std::cout << rank << ". Goes to sleep" << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
@@ -212,8 +260,15 @@ void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char
     const std::lock_guard<std::mutex> lock(lamportClockMutex);
     pkt->type = type;
     pkt->id = id;
-    pkt->ts = lamportClock++;
+    if (tag == TAG_REQ) {
+        pkt->ts = reqLamportClock;
+    }
+    else {
+        pkt->ts = lamportClock;
+    }
+    lamportClock++;
     pkt->action = action;
+    //std::cout << rank << ". Send ACK " << pkt->action << " to " << destination << std::endl;
     MPI_Send(pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
 }
 

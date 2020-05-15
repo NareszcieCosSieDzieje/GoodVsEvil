@@ -32,6 +32,7 @@ extern MPI_Datatype MPI_PACKET_T;
 extern int size;
 extern int rank;
 extern int lamportClock;
+extern int reqLamportClock;
 extern int resourceCount;
 extern char role;
 extern state_t state;
@@ -44,11 +45,26 @@ extern char objectChosen;
 
 extern std::vector<std::vector<int>> toilets;
 extern std::vector<std::vector<int>> flowerpots;
+extern std::vector<char> toiletsState;
+extern std::vector<char> flowerpotsState;
+
 
 void check_thread_support(int provided);
 void initialize(int *argc, char ***argv);
 void mainLoop(void);
 void finalize();
 void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char action);
+
+
+template<typename T>
+inline std::ostream& operator << (std::ostream& os, const std::vector<T>& v){
+    os << "[";
+    for(const auto &i : v){
+        os << " " <<  i;
+    }
+    os << " ]";
+    return os;
+}
+
 
 #endif //_MAIN_HPP_

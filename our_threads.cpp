@@ -2,6 +2,7 @@
 #include "constants.hpp"
 #include "our_threads.hpp"
 
+
 void monitorLoop(void){
     std::cout << "Monitor started" << std::endl;
     std::string instruction = "";
@@ -30,21 +31,26 @@ void monitorLoop(void){
 
 void communicationLoop(void) {
     std::cout << rank << ". Communication started" << std::endl;
-    MPI_Status status{};
-    packet_t packet{};
+    //MPI_Status status{};
+    //packet_t packet{};
 
-    while(true) {
+    while(state != end) {
+        MPI_Status status{};
+        packet_t packet{};
         MPI_Recv(&packet, 1, MPI_PACKET_T, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-        lamportClockMutex.lock();
+        std::cout << rank << ". Insta RECV action:" << packet.action << " id:" << packet.id << " type:" << packet.type << " ts:" << packet.ts << " tag:" << status.MPI_TAG << std::endl;
+        //lamportClockMutex.lock();
         lamportClock = max(lamportClock, packet.ts) + 1;
-        lamportClockMutex.unlock();
+        //lamportClockMutex.unlock();
 
         switch(status.MPI_TAG) {
         case TAG_REQ:
-            std::cout << rank << ". Recieved REQ" << std::endl;
+            //std::cout << rank << ". Recieved REQ" << std::endl;
             //jesli nie chcemy zasobu to to robimy
             if (idChosen == packet.id && objectChosen == packet.type) {
-                if (lamportClock > packet.ts) {
+                std::cout << rank << "." << reqLamportClock << " Fighting for resource " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << std::endl;
+                if (reqLamportClock > packet.ts) {
+                    std::cout << rank << "." << reqLamportClock << " I won " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                     //dodaj do kolejki
                     if (objectChosen == 't') {
                         toilets[idChosen].push_back(status.MPI_SOURCE);
@@ -52,11 +58,18 @@ void communicationLoop(void) {
                         flowerpots[idChosen].push_back(status.MPI_SOURCE);
                     }
                 }
-                else if (lamportClock < packet.ts) {
-                    MPI_Send(&packet, 1, MPI_PACKET_T, status.MPI_SOURCE, TAG_ACK, MPI_COMM_WORLD);
+                else if (reqLamportClock < packet.ts) {
+                    std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
+                    if (objectChosen == 't') {
+                        sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]);
+                    }
+                    else {
+                        sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]);
+                    }
                 }
                 else {
                     if (rank > status.MPI_SOURCE) {
+                        std::cout << rank << "." << reqLamportClock << " I won " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                         if (objectChosen == 't') {
                             toilets[idChosen].push_back(status.MPI_SOURCE);
                         } else if (objectChosen == 'f') {
@@ -64,29 +77,50 @@ void communicationLoop(void) {
                         }
                     }
                     else {
-                        MPI_Send(&packet, 1, MPI_PACKET_T, status.MPI_SOURCE, TAG_ACK, MPI_COMM_WORLD);
+                        std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
+                        if (objectChosen == 't') {
+                            sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]);
+                        }
+                        else {
+                            sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]);
+                        }
                     }
                 }
             }
             else {
-                MPI_Send(&packet, 1, MPI_PACKET_T, status.MPI_SOURCE, TAG_ACK, MPI_COMM_WORLD);
+                //std::cout << rank << "." << lamportClock << " I allow resource " << packet.type << "[" << packet.id << "] for process " << status.MPI_SOURCE << std::endl;
+                if (objectChosen == 't') {
+                    sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]);
+                }
+                else {
+                    sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]);
+                }
             }
             break;
         case TAG_ACK: //FIXME: 
-            std::cout << rank << ". Recieved ACK" << std::endl;
+            //std::cout << rank << ". Recieved ACK" << std::endl;
+            std::cout << rank << ". Recieved ACK action: " << packet.action << std::endl;
+            std::cout << rank <<". From ACK :" << toiletsState << flowerpotsState << std::endl;
             globalAck++;
-            if(globalAck == size-1){
-                globalAck=0;
+            if (objectChosen == 't') {
+                toiletsState[packet.id] = packet.action;
+            }
+            else if (objectChosen == 'f') {
+                flowerpotsState[packet.id] = packet.action;
+            }
+            if (globalAck == size-1) {
+                std::cout << rank << "." << reqLamportClock << " I have all the ACKs " << objectChosen << "[" << idChosen << "]" << std::endl;
+                globalAck = 0;
                 globalAckMutex.unlock();
             }
             break;
        case TAG_END:
-            std::cout << rank << ". Recieved END" << std::endl;
+            std::cout << rank << "." << lamportClock << " Recieved END" << std::endl;
+            globalAckMutex.unlock(); //FIXME: tymczasowe ale dziala
             state = end;
             return;
         }
     }
-    std::cout << rank << ". Communication ended" << std::endl;
 }
 
 int max(int a, int b) {
