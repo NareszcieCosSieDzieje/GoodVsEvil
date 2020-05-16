@@ -35,6 +35,10 @@ Wektor zgód dla doniczek -
 */
 
 int main(int argc, char** argv){
+    if (argc < 3) {
+        std::cerr << "Usage: <num_toilets> <num_flowerpots>" << std::endl;
+        return 1;
+    }
 
     
     globalAckMutex.lock();
@@ -127,23 +131,22 @@ void initialize(int *argc, char ***argv) {
         //startBad()
     }
 
-    resourceCount = size;
-    int randomCount = rand() % (resourceCount - 1) + 1;
-    randomCount = atoi(argv1[1]);
+    int toiletsNum = atoi(argv1[1]);
+    int flowerpotsNum = atoi(argv1[2]);
 
-    toilets.resize(randomCount);
-    flowerpots.resize(resourceCount - randomCount);
-    toiletsState.resize(randomCount, 'g');
-    flowerpotsState.resize(resourceCount - randomCount, 'g');
+    toilets.resize(toiletsNum);
+    flowerpots.resize(flowerpotsNum);
+    toiletsState.resize(toiletsNum, 'g');
+    flowerpotsState.resize(flowerpotsNum, 'g');
     
     if (rank == 0) {
-        std::cout << "Resource Count: " << resourceCount << std::endl;
+        std::cout << "Resource Count: " << toiletsNum + flowerpotsNum << std::endl;
         std::cout << " - Toilet Count: " << toilets.size() << std::endl;
         std::cout << " - Flowerpots Count: " << flowerpots.size() << std::endl;
         monitorThread = std::thread(monitorLoop);
     }
     communcationThread = std::thread(communicationLoop);
-    std::cout << rank << "." << toiletsState << flowerpotsState << std::endl;
+    std::cout << rank << "." << lamportClock << " " << toiletsState << flowerpotsState << std::endl;
 
     std::cout << rank+1 << "/" << size << " Initialized" << std::endl;
 }
@@ -175,8 +178,9 @@ void mainLoop(void) {
         if (chance >= tresh) {
             tresh = baseChance;
             
-            idChosen = -1;
-            objectChosen = 'x';
+            idChosen = 0;
+            objectChosen = 't';
+            //std::vector<char> currentResource = toiletsState;
 
             int typeChance = rand() % 100;
             if (typeChance > 50) {
@@ -199,6 +203,7 @@ void mainLoop(void) {
                 }
                 sendPacket(&packet, i, TAG_REQ, objectChosen, idChosen, role);
             }
+            std::cout << rank <<". After REQ :" << toiletsState << flowerpotsState << std::endl;
             
             globalAckMutex.lock();
 
@@ -268,19 +273,5 @@ void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char
     }
     lamportClock++;
     pkt->action = action;
-    //std::cout << rank << ". Send ACK " << pkt->action << " to " << destination << std::endl;
     MPI_Send(pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
 }
-
-/*
-    void changeState( state_t newState )
-    {
-    pthread_mutex_lock( &stateMut );
-    if (stan==InFinish) { 
-	pthread_mutex_unlock( &stateMut );
-        return;
-    }
-    stan = newState;
-    pthread_mutex_unlock( &stateMut );
-}
-*/

@@ -38,10 +38,10 @@ void communicationLoop(void) {
         MPI_Status status{};
         packet_t packet{};
         MPI_Recv(&packet, 1, MPI_PACKET_T, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-        std::cout << rank << ". Insta RECV action:" << packet.action << " id:" << packet.id << " type:" << packet.type << " ts:" << packet.ts << " tag:" << status.MPI_TAG << std::endl;
-        //lamportClockMutex.lock();
+        std::cout << rank << "." << lamportClock << " Insta RECV action:" << packet.action << " id:" << packet.id << " type:" << packet.type << " ts:" << packet.ts << " tag:" << status.MPI_TAG << std::endl;
+        lamportClockMutex.lock();
         lamportClock = max(lamportClock, packet.ts) + 1;
-        //lamportClockMutex.unlock();
+        lamportClockMutex.unlock();
 
         switch(status.MPI_TAG) {
         case TAG_REQ:
@@ -89,7 +89,7 @@ void communicationLoop(void) {
             }
             else {
                 //std::cout << rank << "." << lamportClock << " I allow resource " << packet.type << "[" << packet.id << "] for process " << status.MPI_SOURCE << std::endl;
-                if (objectChosen == 't') {
+                if (packet.type == 't') {
                     sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]);
                 }
                 else {
@@ -98,15 +98,16 @@ void communicationLoop(void) {
             }
             break;
         case TAG_ACK: //FIXME: 
-            //std::cout << rank << ". Recieved ACK" << std::endl;
             std::cout << rank << ". Recieved ACK action: " << packet.action << std::endl;
             std::cout << rank <<". From ACK :" << toiletsState << flowerpotsState << std::endl;
             globalAck++;
             if (objectChosen == 't') {
-                toiletsState[packet.id] = packet.action;
+                if (packet.action == 'g' || packet.action == 'b')
+                    toiletsState[packet.id] = packet.action;
             }
             else if (objectChosen == 'f') {
-                flowerpotsState[packet.id] = packet.action;
+                if (packet.action == 'g' || packet.action == 'b')
+                    flowerpotsState[packet.id] = packet.action;
             }
             if (globalAck == size-1) {
                 std::cout << rank << "." << reqLamportClock << " I have all the ACKs " << objectChosen << "[" << idChosen << "]" << std::endl;
