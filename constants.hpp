@@ -4,6 +4,7 @@
 #define TAG_REQ 10
 #define TAG_ACK 20
 #define TAG_END 30
+#define TAG_INFO 40
 
 #define ROOT 0
 

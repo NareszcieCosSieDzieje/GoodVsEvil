@@ -178,18 +178,23 @@ void mainLoop(void) {
         if (chance >= tresh) {
             tresh = baseChance;
             
-            idChosen = 0;
-            objectChosen = 't';
-            //std::vector<char> currentResource = toiletsState;
+            std::vector<char> currentResource = toiletsState;
 
-            int typeChance = rand() % 100;
-            if (typeChance > 50) {
-                objectChosen = 't';
-                idChosen = rand() % toilets.size();
-            } else {
-                objectChosen = 'f';
-                idChosen = rand() % flowerpots.size();
-            }
+            // losowanie aż do wylosowania odpowiedniego zasobu
+            
+            do {
+                int typeChance = rand() % 100;
+                if (typeChance > 50) {
+                    objectChosen = 't';
+                    currentResource = toiletsState;
+                    idChosen = rand() % toilets.size();
+                } else {
+                    objectChosen = 'f';
+                    currentResource = flowerpotsState;
+                    idChosen = rand() % flowerpots.size();
+                }
+            } while (currentResource[idChosen] == role);
+
             //std::cout << rank << "." << lamportClock << " Requesting resource " << objectChosen << "[" << idChosen << "]" << std::endl;
             
             packet_t packet{};
@@ -230,6 +235,14 @@ void mainLoop(void) {
             globalCount++;
 
             // sekcja krytyczna
+
+            // Wysylanie info o aktualizacji wartosci
+            for (int i = 0; i < size; i++) {
+                if (i == rank) {
+                    continue;
+                }
+                sendPacket(&packet, i, TAG_INFO, objectChosen, idChosen, role);
+            }
             
             // usuwanie z kolejki (wysyłanie do ludzi ack)
             if (objectChosen == 'f') {
@@ -246,6 +259,7 @@ void mainLoop(void) {
                     toilets[idChosen].pop_back();
                 }
             }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         } else {
             //std::cout << rank << ". Goes to sleep" << std::endl;
@@ -271,7 +285,6 @@ void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char
     else {
         pkt->ts = lamportClock;
     }
-    lamportClock++;
     pkt->action = action;
     MPI_Send(pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
 }

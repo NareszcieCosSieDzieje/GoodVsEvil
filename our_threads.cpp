@@ -115,6 +115,18 @@ void communicationLoop(void) {
                 globalAckMutex.unlock();
             }
             break;
+        case TAG_INFO: 
+            
+            if (packet.type == 't') {
+                if (packet.action == 'g' || packet.action == 'b')
+                    toiletsState[packet.id] = packet.action;
+            }
+            else if (packet.type == 'f') {
+                if (packet.action == 'g' || packet.action == 'b')
+                    flowerpotsState[packet.id] = packet.action;
+            }
+
+            break;
        case TAG_END:
             std::cout << rank << "." << lamportClock << " Recieved END" << std::endl;
             globalAckMutex.unlock(); //FIXME: tymczasowe ale dziala
