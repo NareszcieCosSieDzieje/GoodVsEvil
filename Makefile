@@ -10,5 +10,3 @@ main: $(SOURCES) $(HEADERS)
 clean:
 	rm main
 
-run: main
-	mpirun -np 8 ./main
