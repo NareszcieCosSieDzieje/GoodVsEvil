@@ -8,6 +8,11 @@ std::mutex lamportClockMutex;
 
 std::mutex stopMutex;
 
+std::mutex mutexToiletsState;
+std::mutex mutexFlowerpotsState;
+std::mutex mutexToilets;
+std::mutex mutexFlowerpots;
+
 // zmienne globalne statyczne
 int size, rank, lamportClock, resourceCount, globalAck, reqLamportClock;
 char role;
@@ -140,10 +145,8 @@ void initialize(int *argc, char ***argv)
     std::cout << rank << "." << lamportClock << " Initialized" << std::endl;
 }
 
-/*
-Usunięcie zamków, czeka, aż zakończy się drugi wątek, zwalnia przydzielony typ MPI_PACKET_T
-wywoływane w funkcji main przed końcem
-*/
+/* Usunięcie zamków, czeka, aż zakończy się drugi wątek, zwalnia przydzielony typ MPI_PACKET_T
+wywoływane w funkcji main przed końcem */
 void finalize()
 {
     communcationThread.join();
@@ -179,7 +182,8 @@ void mainLoop(void)
             // Resetujemy próg podjęcia akcji
             tresh = baseChance;
 
-            std::vector<char> currentResource = toiletsState;
+            MACRO_LOCK(mutexToiletsState, std::vector<char> currentResource = toiletsState);
+            //std::vector<char> currentResource = toiletsState;
 
             // Losowanie aż do wylosowania odpowiedniego zasobu
             do
@@ -188,23 +192,23 @@ void mainLoop(void)
                 if (typeChance > 50)
                 {
                     objectChosen = 't';
-                    currentResource = toiletsState;
-                    idChosen = rand() % toilets.size();
+                    MACRO_LOCK(mutexToiletsState, currentResource = toiletsState);
+                    MACRO_LOCK(mutexToilets, idChosen = rand() % toilets.size());
                 }
                 else
                 {
                     objectChosen = 'f';
-                    currentResource = flowerpotsState;
-                    idChosen = rand() % flowerpots.size();
+                    MACRO_LOCK(mutexFlowerpotsState, currentResource = flowerpotsState);
+                    MACRO_LOCK(mutexFlowerpots, idChosen = rand() % flowerpots.size());
                 }
             } while (currentResource[idChosen] == role);
-
+                
             packet_t packet{};
             MPI_Status status{};
 
             std::cout << rank << "." << lamportClock << " Sending REQ to all" << std::endl;
             // Wysyłanie zapytań (requesty)
-            reqLamportClock = lamportClock;
+            MACRO_LOCK(lamportClockMutex, reqLamportClock = lamportClock);
             for (int i = 0; i < size; i++)
             {
                 if (i == rank)
@@ -222,6 +226,7 @@ void mainLoop(void)
             std::string succes = "failure";
             if (objectChosen == 't')
             {
+                mutexToiletsState.lock();
                 if (toiletsState[idChosen] == role)
                 {
                     badCount++;
@@ -231,9 +236,11 @@ void mainLoop(void)
                     toiletsState[idChosen] = role;
                     succes = "succes";
                 }
+                mutexToiletsState.unlock();
             }
             else if (objectChosen == 'f')
-            {
+            {   
+                mutexFlowerpotsState.lock();
                 if (flowerpotsState[idChosen] == role)
                 {
                     badCount++;
@@ -243,6 +250,7 @@ void mainLoop(void)
                     flowerpotsState[idChosen] = role;
                     succes = "succes";
                 }
+                mutexFlowerpotsState.unlock();
             }
             std::cout << rank << "." << lamportClock << " Critical section action " <<  succes << std::endl;
             std::cout << rank << "." << lamportClock << " Local resource state [t,f] " << toiletsState << " " << flowerpotsState << std::endl;
@@ -264,19 +272,23 @@ void mainLoop(void)
             // Usuwanie z kolejki (wysyłanie ACK do procesów zainteresowanych zasobem)
             if (objectChosen == 'f')
             {
+                mutexFlowerpots.lock();
                 for (int i = 0; i < flowerpots[idChosen].size(); i++)
                 {
                     sendPacket(&packet, flowerpots[idChosen].back(), TAG_ACK, 'f', idChosen, role);
                     flowerpots[idChosen].pop_back();
                 }
+                mutexFlowerpots.unlock();
             }
             else if (objectChosen == 't') 
             {
+                mutexToilets.lock();
                 for (int i = 0; i < toilets[idChosen].size(); i++)
                 {
                     sendPacket(&packet, toilets[idChosen].back(), TAG_ACK, 't', idChosen, role);
                     toilets[idChosen].pop_back();
                 }
+                mutexToilets.unlock();
             }
 
             // odpoczynek po wykonaniu akcji
