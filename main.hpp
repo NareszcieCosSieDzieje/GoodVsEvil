@@ -12,6 +12,8 @@
 #include <mutex>
 #include "constants.hpp"
 
+#define MACRO_LOCK(lockM, code) lockM.lock(); code; lockM.unlock()
+
 typedef struct
 {
     int ts;    /* timestamp (zegar lamporta */
@@ -39,9 +41,15 @@ extern int resourceCount;
 extern char role;
 extern state_t state;
 extern int globalAck;
+
 extern std::mutex globalAckMutex;
 extern std::mutex lamportClockMutex;
 extern std::mutex stopMutex;
+
+extern std::mutex mutexToiletsState;
+extern std::mutex mutexFlowerpotsState;
+extern std::mutex mutexToilets;
+extern std::mutex mutexFlowerpots;
 
 extern int idChosen;
 extern char objectChosen;
