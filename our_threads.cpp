@@ -14,7 +14,7 @@ void monitorLoop(void)
         packet_t packet;
 
         // Po wpisaniu "end" użytkownik zamyka program
-        if (instruction == "end") 
+        if (instruction == "end" || instruction == "exit" || instruction == "quit") 
         {
             for (int i = 0; i < size; i++)
             {
@@ -98,6 +98,7 @@ void communicationLoop(void)
                 }
                 else if (reqLamportClock < packet.ts) // Mamy niższy priorytet, wysyłamy ACK do drugiego procesu
                 {
+
                     std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                     if (objectChosen == 't')
                     {
@@ -125,6 +126,7 @@ void communicationLoop(void)
                     }
                     else // Mamy niższą rangę, wysyłamy ACK do drugiego procesu
                     {
+
                         std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                         if (objectChosen == 't')
                         {
@@ -143,10 +145,14 @@ void communicationLoop(void)
                 std::cout << rank << "." << lamportClock << " I allow resource " << packet.type << "[" << packet.id << "] for process " << status.MPI_SOURCE << std::endl;
                 if (packet.type == 't')
                 {
+                    if (packet.action == role)
+                        usableToilets.erase(packet.id);
                     MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]));
                 }
                 else
                 {
+                    if (packet.action == role)
+                        usableFlowerpots.erase(packet.id);
                     MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]));
                 }
             }
@@ -160,6 +166,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexToiletsState ,toiletsState[packet.id] = packet.action);
+                    if (packet.action != role)
+                        usableToilets.insert(packet.id);
+                    else
+                        usableToilets.erase(packet.id);
                 }
             }
             else if (objectChosen == 'f')
@@ -167,6 +177,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexFlowerpotsState, flowerpotsState[packet.id] = packet.action);
+                    if (packet.action != role)
+                        usableFlowerpots.insert(packet.id);
+                    else
+                        usableFlowerpots.erase(packet.id);
                 }
             }
 
@@ -185,6 +199,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexToiletsState, toiletsState[packet.id] = packet.action);
+                    if (packet.action != role)
+                        usableToilets.insert(packet.id);
+                    else
+                        usableToilets.erase(packet.id);
                 }
             }
             else if (packet.type == 'f')
@@ -192,6 +210,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexFlowerpotsState ,flowerpotsState[packet.id] = packet.action);
+                    if (packet.action != role)
+                        usableFlowerpots.insert(packet.id);
+                    else
+                        usableFlowerpots.erase(packet.id);
                 }
             }
 

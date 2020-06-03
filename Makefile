@@ -9,4 +9,3 @@ main: $(SOURCES) $(HEADERS)
 
 clean:
 	rm main
-

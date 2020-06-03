@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include <cstdlib>
+#include <set>
 #include <string>
 #include <chrono>
 #include <mutex>
@@ -20,6 +21,7 @@ typedef struct
     char type; /* pole nie przesyłane, ale ustawiane w main_loop */
     int id;
     char action; /* przykładowe pole z danymi; można zmienić nazwę na bardziej pasującą */
+    int packet_id;
 } packet_t;
 
 typedef enum
@@ -58,6 +60,8 @@ extern std::vector<std::vector<int>> toilets;
 extern std::vector<std::vector<int>> flowerpots;
 extern std::vector<char> toiletsState;
 extern std::vector<char> flowerpotsState;
+extern std::set<int> usableFlowerpots;
+extern std::set<int> usableToilets;
 
 void check_thread_support(int provided);
 void initialize(int *argc, char ***argv);

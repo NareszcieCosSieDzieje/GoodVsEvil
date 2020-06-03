@@ -13,6 +13,7 @@ std::mutex mutexFlowerpotsState;
 std::mutex mutexToilets;
 std::mutex mutexFlowerpots;
 
+
 // zmienne globalne statyczne
 int size, rank, lamportClock, resourceCount, globalAck, reqLamportClock;
 char role;
@@ -30,6 +31,9 @@ std::vector<std::vector<int>> flowerpots;
 // wektory przechowujace stan zasobów
 std::vector<char> toiletsState;
 std::vector<char> flowerpotsState;
+
+std::set<int> usableFlowerpots;
+std::set<int> usableToilets;
 
 std::thread monitorThread;
 std::thread communcationThread;
@@ -136,6 +140,14 @@ void initialize(int *argc, char ***argv)
     toiletsState.resize(toiletsNum, 'g');
     flowerpotsState.resize(flowerpotsNum, 'g');
 
+    if (role == 'b')
+    {
+        for (int i = 0; i < flowerpotsNum; i++)
+            usableFlowerpots.insert(i);
+        for (int i = 0; i < toiletsNum; i++)
+            usableToilets.insert(i);
+    }
+
     if (rank == 0)
     {
         monitorThread = std::thread(monitorLoop);
@@ -182,27 +194,63 @@ void mainLoop(void)
             // Resetujemy próg podjęcia akcji
             tresh = baseChance;
 
-            MACRO_LOCK(mutexToiletsState, std::vector<char> currentResource = toiletsState);
-            //std::vector<char> currentResource = toiletsState;
-
-            // Losowanie aż do wylosowania odpowiedniego zasobu
-            do
+            int typeChance = rand() % 100; // Losujemy jaki typ zasobu chcemy dostać
+            if (typeChance > 50) // Wylosowaliśmy toaletę
             {
-                int typeChance = rand() % 100;
-                if (typeChance > 50)
+                if (usableToilets.empty()) // Nie ma wolnych toalet, sprawdzamy doniczki
+                {
+                    if (usableFlowerpots.empty()) // Nie ma wolnych doniczek
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        continue;
+                    }
+                    else // Są wolne doniczki
+                    {
+                        objectChosen = 'f';
+                        int idx = rand() % usableFlowerpots.size();
+                        int x = *std::next(usableFlowerpots.begin(), idx);
+                        usableFlowerpots.erase(x);
+                        idChosen = x;
+                    }
+                }
+                else // Są wolne toaletu
                 {
                     objectChosen = 't';
-                    MACRO_LOCK(mutexToiletsState, currentResource = toiletsState);
-                    MACRO_LOCK(mutexToilets, idChosen = rand() % toilets.size());
+                    int idx = rand() % usableToilets.size();
+                    int x = *std::next(usableToilets.begin(), idx);
+                    usableToilets.erase(x);
+                    idChosen = x;
                 }
-                else
+            }
+            else // Wylosowaliśmy donczikę
+            {
+                if (usableFlowerpots.empty()) // Nie ma wolnych doniczek, sprawdzamy toalety
+                {
+                    if (usableToilets.empty()) // Nie ma też wolnych toalet
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        continue;
+                    }
+                    else // Ale są wolne toalety
+                    {
+                        objectChosen = 't';
+                        int idx = rand() % usableToilets.size();
+                        int x = *std::next(usableToilets.begin(), idx);
+                        usableToilets.erase(x);
+                        idChosen = x;
+                    }
+                }
+                else // Są wolne doniczki
                 {
                     objectChosen = 'f';
-                    MACRO_LOCK(mutexFlowerpotsState, currentResource = flowerpotsState);
-                    MACRO_LOCK(mutexFlowerpots, idChosen = rand() % flowerpots.size());
+                    int idx = rand() % usableFlowerpots.size();
+                    int x = *std::next(usableFlowerpots.begin(), idx);
+                    usableFlowerpots.erase(x);
+                    idChosen = x;
                 }
-            } while (currentResource[idChosen] == role);
-                
+            }
+
+
             packet_t packet{};
             MPI_Status status{};
 
@@ -221,6 +269,7 @@ void mainLoop(void)
             // Przechodzimy tylko jeśli mamy wszystkie ACK
             globalAckMutex.lock();
             // Sekcja krytyczna
+            
 
             // zależnie od zasobu dokonujemy naszej modyfikacji lub zliczamy błąd (nie wykonanie akcji)
             std::string succes = "failure";
