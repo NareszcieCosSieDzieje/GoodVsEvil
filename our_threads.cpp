@@ -82,60 +82,30 @@ void communicationLoop(void)
             // dostaliśmy prośbę o zasób którego chcemy sami używać
             if (idChosen == packet.id && objectChosen == packet.type)
             {
-                std::cout << rank << "." << reqLamportClock << " Fighting for resource " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << std::endl;
-                // Mamy wyższy priorytet, dodajemy proces do kolejki procesów blokowanych
-                if (reqLamportClock > packet.ts)
+                std::cout << rank << "." << lamportClock << " Fighting for resource " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << std::endl;
+                // Mamy wyższą rangę, dodajemy proces do kolejki procesów blokowanych
+                if (rank > status.MPI_SOURCE)
                 {
-                    std::cout << rank << "." << reqLamportClock << " I won " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
-                    if (objectChosen == 't')
-                    {
-                        MACRO_LOCK(mutexToilets, toilets[idChosen].push_back(status.MPI_SOURCE) );
-                    }
-                    else if (objectChosen == 'f')
-                    {
-                        MACRO_LOCK(mutexFlowerpots, flowerpots[idChosen].push_back(status.MPI_SOURCE) );
-                    }
+                    std::cout << rank << "." << reqLamportClock << " I won[R] " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                 }
-                else if (reqLamportClock < packet.ts) // Mamy niższy priorytet, wysyłamy ACK do drugiego procesu
+                else // Mamy niższą rangę, wysyłamy ACK do drugiego procesu
                 {
-
                     std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
+
+                    idChosen = -1;
+                    objectChosen = 'x';
+                    globalAck = 0;
+                    packetID += 1;
+                    lostResource = true;
+                    globalAckMutex.unlock();
+
                     if (objectChosen == 't')
                     {
-                        MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]));
+                        MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id], packet.packet_id));
                     }
                     else
                     {
-                        MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]));
-                    }
-                }
-                else // Mamy równe priorytety
-                {
-                    // Mamy wyższą rangę, dodajemy proces do kolejki procesów blokowanych
-                    if (rank > status.MPI_SOURCE)
-                    {
-                        std::cout << rank << "." << reqLamportClock << " I won " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
-                        if (objectChosen == 't')
-                        {
-                            MACRO_LOCK(mutexToilets, toilets[idChosen].push_back(status.MPI_SOURCE));
-                        }
-                        else if (objectChosen == 'f')
-                        {
-                            MACRO_LOCK(mutexFlowerpotsState, flowerpots[idChosen].push_back(status.MPI_SOURCE));
-                        }
-                    }
-                    else // Mamy niższą rangę, wysyłamy ACK do drugiego procesu
-                    {
-
-                        std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
-                        if (objectChosen == 't')
-                        {
-                            MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]));
-                        }
-                        else
-                        {
-                            MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]));
-                        }
+                        MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id], packet.packet_id));
                     }
                 }
             }
@@ -147,18 +117,23 @@ void communicationLoop(void)
                 {
                     if (packet.action == role)
                         usableToilets.erase(packet.id);
-                    MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id]));
+                    MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id], packet.packet_id));
                 }
                 else
                 {
                     if (packet.action == role)
                         usableFlowerpots.erase(packet.id);
-                    MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id]));
+                    MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id], packet.packet_id));
                 }
             }
             break;
         case TAG_ACK:
             // Zwiększamy licznik otrzymanych zgód
+            if (packet.packet_id != packetID)
+            {
+                std::cout << rank << "." << lamportClock << " I received old ACK and ignored it" << std::endl;
+                break;
+            }
             globalAck++;
             // Aktualizujemy wartość zasobu na otrzymaną od procesu
             if (objectChosen == 't')
@@ -166,10 +141,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexToiletsState ,toiletsState[packet.id] = packet.action);
-                    if (packet.action != role)
+                    /*if (packet.action != role)
                         usableToilets.insert(packet.id);
                     else
-                        usableToilets.erase(packet.id);
+                        usableToilets.erase(packet.id);*/
                 }
             }
             else if (objectChosen == 'f')
@@ -177,10 +152,10 @@ void communicationLoop(void)
                 if (packet.action == 'g' || packet.action == 'b')
                 {
                     MACRO_LOCK(mutexFlowerpotsState, flowerpotsState[packet.id] = packet.action);
-                    if (packet.action != role)
+                    /*if (packet.action != role)
                         usableFlowerpots.insert(packet.id);
                     else
-                        usableFlowerpots.erase(packet.id);
+                        usableFlowerpots.erase(packet.id);*/
                 }
             }
 

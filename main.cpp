@@ -10,9 +10,9 @@ std::mutex stopMutex;
 
 std::mutex mutexToiletsState;
 std::mutex mutexFlowerpotsState;
-std::mutex mutexToilets;
-std::mutex mutexFlowerpots;
 
+bool lostResource = false;
+int packetID = 0;
 
 // zmienne globalne statyczne
 int size, rank, lamportClock, resourceCount, globalAck, reqLamportClock;
@@ -23,10 +23,6 @@ state_t state;
 // startowe wartości dla parametrów wyboru
 int idChosen = -1;
 char objectChosen = 'x';
-
-// kolejki procesów blokowanych przez nas
-std::vector<std::vector<int>> toilets;
-std::vector<std::vector<int>> flowerpots;
 
 // wektory przechowujace stan zasobów
 std::vector<char> toiletsState;
@@ -95,14 +91,15 @@ void initialize(int *argc, char ***argv)
     MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     check_thread_support(provided);
 
-    const int nitems = 4;
-    int blocklengths[4] = {1, 1, 1, 1};
-    MPI_Datatype typy[4] = {MPI_INT, MPI_CHAR, MPI_INT, MPI_CHAR};
-    MPI_Aint offsets[4];
+    const int nitems = 5;
+    int blocklengths[5] = {1, 1, 1, 1, 1};
+    MPI_Datatype typy[5] = {MPI_INT, MPI_CHAR, MPI_INT, MPI_CHAR, MPI_INT};
+    MPI_Aint offsets[5];
     offsets[0] = offsetof(packet_t, ts);
     offsets[1] = offsetof(packet_t, type);
     offsets[2] = offsetof(packet_t, id);
     offsets[3] = offsetof(packet_t, action);
+    offsets[4] = offsetof(packet_t, packet_id);
 
     MPI_Type_create_struct(nitems, blocklengths, offsets, typy, &MPI_PACKET_T);
     MPI_Type_commit(&MPI_PACKET_T);
@@ -135,8 +132,6 @@ void initialize(int *argc, char ***argv)
     int toiletsNum = atoi(argv1[1]);
     int flowerpotsNum = atoi(argv1[2]);
 
-    toilets.resize(toiletsNum);
-    flowerpots.resize(flowerpotsNum);
     toiletsState.resize(toiletsNum, 'g');
     flowerpotsState.resize(flowerpotsNum, 'g');
 
@@ -195,6 +190,8 @@ void mainLoop(void)
             tresh = baseChance;
 
             int typeChance = rand() % 100; // Losujemy jaki typ zasobu chcemy dostać
+            packetID += 1;
+            std::cout << rank << " Pre erase" << usableFlowerpots <<  " " << usableToilets  << " " << idChosen << " " << objectChosen << std::endl;
             if (typeChance > 50) // Wylosowaliśmy toaletę
             {
                 if (usableToilets.empty()) // Nie ma wolnych toalet, sprawdzamy doniczki
@@ -249,6 +246,7 @@ void mainLoop(void)
                     idChosen = x;
                 }
             }
+            std::cout << rank << " Post erase" << usableFlowerpots <<  " " << usableToilets << " " << idChosen << " " << objectChosen << std::endl;
 
 
             packet_t packet{};
@@ -263,13 +261,20 @@ void mainLoop(void)
                 {
                     continue;
                 }
-                sendPacket(&packet, i, TAG_REQ, objectChosen, idChosen, role);
+                sendPacket(&packet, i, TAG_REQ, objectChosen, idChosen, role, packetID);
             }
 
             // Przechodzimy tylko jeśli mamy wszystkie ACK
-            globalAckMutex.lock();
-            // Sekcja krytyczna
-            
+			printf("Zatrzymanie przed mutexem! - %d\n", rank);
+			globalAckMutex.lock();
+			printf("Wyszedłem z mutexu - %d\n", rank);
+		    if(lostResource)
+			{
+
+                lostResource = false;
+                continue;
+            }
+
 
             // zależnie od zasobu dokonujemy naszej modyfikacji lub zliczamy błąd (nie wykonanie akcji)
             std::string succes = "failure";
@@ -303,10 +308,18 @@ void mainLoop(void)
             }
             std::cout << rank << "." << lamportClock << " Critical section action " <<  succes << std::endl;
             std::cout << rank << "." << lamportClock << " Local resource state [t,f] " << toiletsState << " " << flowerpotsState << std::endl;
+            std::cout << rank << "." << lamportClock << " Usable tables state [t,f] " << usableToilets << " " << usableFlowerpots << std::endl;
             // zwiększamy liczbę dostepów do sekcji krytycznej
             globalCount++;
 
             std::cout << rank << "." << lamportClock << " Send INFO to all" << std::endl;
+
+            int sendID = idChosen;
+            char sendObject = objectChosen;
+            
+            idChosen = -1;
+            objectChosen = 'x';
+
             // Wysylanie wiadomosci info o aktualizacji stanu danego zasobu
             for (int i = 0; i < size; i++)
             {
@@ -314,30 +327,7 @@ void mainLoop(void)
                 {
                     continue;
                 }
-                sendPacket(&packet, i, TAG_INFO, objectChosen, idChosen, role);
-            }
-
-            std::cout << rank << "." << lamportClock << " FREE processes (Send ACK)" << std::endl;
-            // Usuwanie z kolejki (wysyłanie ACK do procesów zainteresowanych zasobem)
-            if (objectChosen == 'f')
-            {
-                mutexFlowerpots.lock();
-                for (int i = 0; i < flowerpots[idChosen].size(); i++)
-                {
-                    sendPacket(&packet, flowerpots[idChosen].back(), TAG_ACK, 'f', idChosen, role);
-                    flowerpots[idChosen].pop_back();
-                }
-                mutexFlowerpots.unlock();
-            }
-            else if (objectChosen == 't') 
-            {
-                mutexToilets.lock();
-                for (int i = 0; i < toilets[idChosen].size(); i++)
-                {
-                    sendPacket(&packet, toilets[idChosen].back(), TAG_ACK, 't', idChosen, role);
-                    toilets[idChosen].pop_back();
-                }
-                mutexToilets.unlock();
+                sendPacket(&packet, i, TAG_INFO, sendObject, sendID, role, packetID);
             }
 
             // odpoczynek po wykonaniu akcji
@@ -353,7 +343,7 @@ void mainLoop(void)
 }
 
 // Funkcja obsługująca wysyłanie pakietów pomiędzy procesami, ustawia pakiet i go wysyła
-void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char action)
+void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char action, int packet_id)
 {
     const std::lock_guard<std::mutex> lock(lamportClockMutex);
     pkt->type = type;
@@ -368,5 +358,6 @@ void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char
         pkt->ts = lamportClock;
     }
     pkt->action = action;
+    pkt->packet_id = packet_id;
     MPI_Send(pkt, 1, MPI_PACKET_T, destination, tag, MPI_COMM_WORLD);
 }

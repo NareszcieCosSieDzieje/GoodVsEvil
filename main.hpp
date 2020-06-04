@@ -43,6 +43,8 @@ extern int resourceCount;
 extern char role;
 extern state_t state;
 extern int globalAck;
+extern bool lostResource;
+extern int packetID;
 
 extern std::mutex globalAckMutex;
 extern std::mutex lamportClockMutex;
@@ -67,7 +69,7 @@ void check_thread_support(int provided);
 void initialize(int *argc, char ***argv);
 void mainLoop(void);
 void finalize();
-void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char action);
+void sendPacket(packet_t *pkt, int destination, int tag, char type, int id, char action, int packet_id);
 
 template <typename T>
 inline std::ostream &operator<<(std::ostream &os, const std::vector<T> &v)
@@ -78,6 +80,18 @@ inline std::ostream &operator<<(std::ostream &os, const std::vector<T> &v)
         os << " " << i;
     }
     os << " ]";
+    return os;
+}
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const std::set<T> &v)
+{
+    os << "{";
+    for (const auto &i : v)
+    {
+        os << " " << i;
+    }
+    os << " }";
     return os;
 }
 
