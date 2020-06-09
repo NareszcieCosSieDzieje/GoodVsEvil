@@ -83,29 +83,56 @@ void communicationLoop(void)
             if (idChosen == packet.id && objectChosen == packet.type)
             {
                 std::cout << rank << "." << lamportClock << " Fighting for resource " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << std::endl;
-                // Mamy wyższą rangę, dodajemy proces do kolejki procesów blokowanych
-                if (rank > status.MPI_SOURCE)
+                // Mamy wyższy priorytet nic nie wysyłamy ( drugi wie że przegrał)
+                if (packet.ts > reqLamportClock)
                 {
-                    std::cout << rank << "." << reqLamportClock << " I won[R] " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
+                    std::cout << rank << "." << reqLamportClock << " I won[LC] " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                 }
-                else // Mamy niższą rangę, wysyłamy ACK do drugiego procesu
+                else if (packet.ts < reqLamportClock) // Przegraliśmy, więc losujemy nowy zasób i wysyłamy ACK
                 {
                     std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
 
-                    idChosen = -1;
-                    objectChosen = 'x';
-                    globalAck = 0;
-                    packetID += 1;
-                    lostResource = true;
-                    globalAckMutex.unlock();
+                        idChosen = -1;
+                        objectChosen = 'x';
+                        globalAck = 0;
+                        packetID += 1;
+                        lostResource = true;
+                        globalAckMutex.unlock();
 
-                    if (objectChosen == 't')
+                        if (objectChosen == 't')
+                        {
+                            MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id], packet.packet_id));
+                        }
+                        else
+                        {
+                            MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id], packet.packet_id));
+                        }
+                }
+                else // Było po równo więc porównujemy rangi
+                {
+                    if (rank > status.MPI_SOURCE)
                     {
-                        MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id], packet.packet_id));
+                        std::cout << rank << "." << reqLamportClock << " I won[R] " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
                     }
-                    else
+                    else // Mamy niższą rangę, wysyłamy ACK do drugiego procesu
                     {
-                        MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id], packet.packet_id));
+                        std::cout << rank << "." << reqLamportClock << " I lost " << objectChosen << "[" << idChosen << "] with process " << status.MPI_SOURCE << "." << packet.ts << std::endl;
+
+                        idChosen = -1;
+                        objectChosen = 'x';
+                        globalAck = 0;
+                        packetID += 1;
+                        lostResource = true;
+                        globalAckMutex.unlock();
+
+                        if (objectChosen == 't')
+                        {
+                            MACRO_LOCK(mutexToiletsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, toiletsState[packet.id], packet.packet_id));
+                        }
+                        else
+                        {
+                            MACRO_LOCK(mutexFlowerpotsState, sendPacket(&packet, status.MPI_SOURCE, TAG_ACK, packet.type, packet.id, flowerpotsState[packet.id], packet.packet_id));
+                        }
                     }
                 }
             }

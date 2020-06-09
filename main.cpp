@@ -190,6 +190,7 @@ void mainLoop(void)
             tresh = baseChance;
 
             int typeChance = rand() % 100; // Losujemy jaki typ zasobu chcemy dostać
+            MACRO_LOCK(lamportClockMutex, reqLamportClock = lamportClock);
             packetID += 1;
             std::cout << rank << " Pre erase" << usableFlowerpots <<  " " << usableToilets  << " " << idChosen << " " << objectChosen << std::endl;
             if (typeChance > 50) // Wylosowaliśmy toaletę
@@ -254,7 +255,6 @@ void mainLoop(void)
 
             std::cout << rank << "." << lamportClock << " Sending REQ to all" << std::endl;
             // Wysyłanie zapytań (requesty)
-            MACRO_LOCK(lamportClockMutex, reqLamportClock = lamportClock);
             for (int i = 0; i < size; i++)
             {
                 if (i == rank)
